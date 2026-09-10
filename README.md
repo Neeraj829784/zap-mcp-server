@@ -1,272 +1,248 @@
-# OWASP ZAP MCP Server
+<div align="center">
+
+# 🕷️ OWASP ZAP MCP Server
+
+### Drive the world's most popular web app scanner from your AI assistant.
+
+Point Claude, Cursor, or any [MCP](https://modelcontextprotocol.io) client at
+**[OWASP ZAP](https://www.zaproxy.org/)** and run real crawls, authenticated
+scans, and vulnerability triage — through **67 curated, safety-gated tools**
+built straight from the [official ZAP API](https://www.zaproxy.org/docs/api/).
 
 [![CI](https://github.com/Neeraj829784/zap-mcp-server/actions/workflows/ci.yml/badge.svg)](https://github.com/Neeraj829784/zap-mcp-server/actions/workflows/ci.yml)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
+[![Python 3.12](https://img.shields.io/badge/Python-3.12-3776AB?logo=python&logoColor=white)](https://www.python.org/)
+[![OWASP ZAP 2.17](https://img.shields.io/badge/OWASP%20ZAP-2.17.0-00549E)](https://www.zaproxy.org/)
+[![MCP](https://img.shields.io/badge/Protocol-MCP-6E56CF)](https://modelcontextprotocol.io)
+[![Docker](https://img.shields.io/badge/Docker-Compose-2496ED?logo=docker&logoColor=white)](https://docs.docker.com/compose/)
 
-A production-grade [Model Context Protocol](https://modelcontextprotocol.io)
-(MCP) server that exposes [OWASP ZAP](https://www.zaproxy.org/) to LLM clients
-(Claude Desktop, Cursor, etc.) for **authorized penetration testing and
-bug-bounty** workflows.
+</div>
 
-It provides a curated surface of **67 tools** across crawling, active/passive
-scanning, authenticated scanning, findings triage, imports, automation, and
-reporting — built directly against the official
-[ZAP API](https://www.zaproxy.org/docs/api/), with a server-side target
-authorization policy so an LLM cannot direct attack traffic at unauthorized or
-internal infrastructure.
-
-> ⚠️ **Authorized use only.** Active scanning is an attack. Only run it against
-> systems you have explicit, written permission to test. See
-> [Responsible use](#responsible-use).
+> [!WARNING]
+> **Authorized use only.** Active scanning sends real attack payloads. Run it
+> **only** against systems you have explicit, written permission to test.
+> This server refuses cloud-metadata targets and can be pinned to an
+> engagement scope — but the responsibility is yours.
 
 ---
 
-## Highlights
+## ✨ Why this exists
 
-- **67 curated tools** — not a raw 1:1 mirror of ZAP's hundreds of endpoints.
-  High-risk/desktop-only components (script engine, break/intercept, HUD,
-  Selenium launch, autoupdate) are intentionally excluded.
-- **Full authenticated-scan workflow** — context → authentication method →
-  logged-in/out indicators → user credentials → forced-user → `scan_as_user`
-  for spider, AJAX spider, and active scan.
-- **Target authorization policy** — cloud metadata endpoints are always refused;
-  optional scope allowlist and private-range blocking.
-- **Reliable by design** — one pooled async HTTP client with lifecycle
-  management, bounded retries with backoff, typed errors, and a uniform result
-  envelope so a single tool call can never crash the server.
-- **Fail-closed configuration** — refuses to start without an API key (unless
-  explicitly opted out), validates all settings, and never logs secrets.
-- **Hardened containers** — pinned image, non-root user, healthchecks,
-  health-gated startup, secrets via `.env`.
-- **Tested** — unit test suite covering the security boundary, config
-  validation, error handling, and tool behavior.
+Talking to ZAP's raw REST API from an LLM is clumsy and risky: hundreds of
+endpoints, no guardrails, and it's easy to point an attack at the wrong host.
+This project gives your AI assistant a **small, opinionated, safe** surface:
+
+<table>
+<tr>
+<td width="50%" valign="top">
+
+**🔐 Safe by design**
+- Cloud metadata endpoints (`169.254.169.254`) are **always** refused
+- Optional scope allowlist + private-range blocking
+- Control port bound to localhost by default
+
+</td>
+<td width="50%" valign="top">
+
+**🔑 Real authenticated scanning**
+- Full workflow: context → auth method → indicators → user → forced-user
+- `scan_as_user` for spider, AJAX spider, and active scan
+- The thing most ZAP wrappers skip entirely
+
+</td>
+</tr>
+<tr>
+<td width="50%" valign="top">
+
+**🧱 Reliable under load**
+- One pooled async client, bounded retries with backoff
+- Typed errors + a uniform result envelope
+- A single bad call can never crash the server
+
+</td>
+<td width="50%" valign="top">
+
+**🚢 Production posture**
+- Fail-closed config, secrets never logged
+- Pinned, non-root, health-gated containers
+- Green CI on every push
+
+</td>
+</tr>
+</table>
 
 ---
 
-## Architecture
+## 🏗️ Architecture
 
-```text
-[ LLM client / AI assistant ]
-        │  MCP over Streamable HTTP (port 8000)
-        ▼
-[ zap-mcp-server ]  Python 3.12 · MCPServer · target policy · pooled ZAP client
-        │  internal Docker network (zapnet)
-        ▼
-[ zap-daemon ]      OWASP ZAP 2.17.0 headless daemon (API on 8080)
+```mermaid
+flowchart LR
+    A["🤖 LLM client<br/>(Claude · Cursor)"] -->|MCP / Streamable HTTP<br/>127.0.0.1:8000| B
+    B["🕷️ zap-mcp-server<br/>Python 3.12 · 67 tools<br/>target policy · pooled client"] -->|internal docker net<br/>http://zap:8080| C
+    C["🛡️ zap-daemon<br/>OWASP ZAP 2.17.0<br/>API restricted to private ranges"]
+    B -.->|refuses metadata / out-of-scope| X["⛔ blocked targets"]
 ```
 
-- The MCP server reaches ZAP over the internal Docker network at
-  `http://zap:8080`.
-- The ZAP API/proxy port is published only on `127.0.0.1:8080` (not on all host
-  interfaces).
-- All state-changing ZAP `action` endpoints require the API key.
+- The MCP server reaches ZAP over the internal Docker network.
+- Both ports are published on **`127.0.0.1` only** — nothing is world-exposed.
+- Every state-changing ZAP action requires the API key.
 
 ---
 
-## Security model
-
-| Control | Behavior |
-|---|---|
-| **API key** | Required. The server fails to start if `ZAP_API_KEY` is unset (override with `ZAP_ALLOW_INSECURE=true` for local dev only). Never logged. |
-| **Metadata block** | `169.254.169.254`, `metadata.google.internal`, and equivalents are **always** refused for attack tools. Not configurable. |
-| **Scope allowlist** | `ZAP_TARGET_ALLOWLIST` (comma-separated host suffixes) pins the engagement scope. When set, only matching hosts may be crawled/attacked. |
-| **Private-range block** | `ZAP_BLOCK_PRIVATE_TARGETS=true` refuses private/loopback/link-local targets (keep off for local labs). |
-| **Report path safety** | Report filenames are reduced to a basename to prevent path traversal; output is confined to `ZAP_REPORT_DIR`. |
-| **Secret hygiene** | The API key lives only in request headers/query params and is never included in logs or error messages. |
-
-Read-only view tools (version, sites, alerts) are intentionally **not** gated —
-they observe existing state and generate no traffic to the target.
-
-> **Network exposure.** The MCP control endpoint has **no built-in
-> authentication** and can launch attack traffic, so `docker-compose.yml`
-> publishes it on **`127.0.0.1:8000` only**. To expose it deliberately, set
-> `MCP_BIND=0.0.0.0` *and* place an authenticating reverse proxy in front of it.
-> The ZAP API is likewise published on `127.0.0.1:8080` and its API address is
-> restricted to loopback/private ranges.
-
----
-
-## Quick start
-
-### 1. Configure secrets
+## 🚀 Quick start
 
 ```bash
+# 1. Set your secret (never committed)
 cp .env.example .env
-# Edit .env and set ZAP_API_KEY to a long, random value.
-```
+#    edit .env -> ZAP_API_KEY=<long-random-value>
 
-`.env` is git-ignored. The same key is used by both the ZAP daemon and the MCP
-server (wired automatically in `docker-compose.yml`).
-
-### 2. Launch the stack
-
-```bash
+# 2. Launch (ZAP starts, becomes healthy, then the MCP server starts)
 docker compose up -d --build
+
+# 3. Confirm
+docker compose ps                    # both services: healthy
+docker compose logs -f mcp-server    # "Registered 67 MCP tools"
 ```
 
-Compose starts ZAP, waits for it to become **healthy**, then starts the MCP
-server (health-gated startup).
-
-### 3. Verify
-
-```bash
-docker compose ps                     # both services should be "healthy"
-docker compose logs -f mcp-server     # expect: "Registered 67 MCP tools"
-```
-
----
-
-## Configuration
-
-All settings are environment variables (see `.env.example`). Validated at
-startup — invalid values fail fast.
-
-| Variable | Default | Description |
-|---|---|---|
-| `ZAP_API_KEY` | *(required)* | ZAP API key. Server refuses to start if unset. |
-| `ZAP_BASE_URL` | `http://zap:8080` | ZAP API base URL. |
-| `ZAP_TARGET_ALLOWLIST` | *(empty)* | Comma-separated host suffixes allowed for attack tools. Empty = any (metadata still blocked). |
-| `ZAP_BLOCK_PRIVATE_TARGETS` | `false` | Refuse private/loopback targets for attack tools. |
-| `ZAP_REPORT_DIR` | `/zap/wrk` | Directory (inside ZAP) reports are written to. |
-| `REQUEST_TIMEOUT` / `CONNECT_TIMEOUT` | `60` / `10` | HTTP timeouts (seconds). |
-| `ZAP_MAX_RETRIES` / `ZAP_RETRY_BACKOFF` | `2` / `0.5` | Transient-error retry policy. |
-| `MCP_HOST` / `MCP_PORT` | `0.0.0.0` / `8000` | MCP server bind address. |
-| `ZAP_ALLOW_INSECURE` | `false` | Allow start without an API key (dev only). |
-
----
-
-## Tool catalogue (67 tools)
-
-**Core & health** — `zap_get_version`, `zap_access_url`\*, `zap_get_sites`,
-`zap_get_urls`, `zap_new_session`
-
-**Crawling** — `zap_spider_scan`\*, `zap_spider_scan_as_user`\*,
-`zap_spider_status`, `zap_spider_results`, `zap_spider_stop`,
-`zap_ajax_spider_scan`\*, `zap_ajax_spider_scan_as_user`\*,
-`zap_ajax_spider_status`, `zap_ajax_spider_results`, `zap_ajax_spider_stop`
-
-**Scanners** — `zap_active_scan`\*, `zap_active_scan_as_user`\*,
-`zap_active_scan_status`, `zap_active_scan_progress`, `zap_active_scan_stop`,
-`zap_active_scan_pause`, `zap_active_scan_resume`, `zap_list_scan_policies`,
-`zap_passive_scan_status`, `zap_passive_scan_set_enabled`,
-`zap_passive_scan_clear_queue`
-
-**Findings & triage** — `zap_get_alerts`, `zap_get_alerts_summary`,
-`zap_get_alert_details`, `zap_get_number_of_alerts`, `zap_delete_all_alerts`,
-`zap_add_alert_filter`, `zap_list_alert_filters`, `zap_apply_alert_filters`,
-`zap_retest_alerts`
-
-**Context & scope** — `zap_create_context`, `zap_include_in_context`,
-`zap_exclude_from_context`, `zap_list_contexts`, `zap_get_context`,
-`zap_export_context`, `zap_import_context`
-
-**Imports & automation** — `zap_import_openapi_url`, `zap_import_openapi_file`,
-`zap_import_graphql_url`, `zap_import_har`, `zap_import_urls`,
-`zap_run_automation_plan`, `zap_automation_plan_progress`
-
-**Authentication** — `zap_get_auth_methods`,
-`zap_get_auth_method_config_params`, `zap_set_authentication_method`,
-`zap_get_authentication_method`, `zap_set_logged_in_indicator`,
-`zap_set_logged_out_indicator`
-
-**Users** — `zap_new_user`, `zap_set_user_credentials`, `zap_set_user_enabled`,
-`zap_list_users`, `zap_get_user`
-
-**Forced user** — `zap_set_forced_user`, `zap_set_forced_user_mode`,
-`zap_get_forced_user`, `zap_is_forced_user_mode_enabled`
-
-**Reports** — `zap_list_report_templates`, `zap_report_template_details`,
-`zap_generate_report`
-
-\* = gated by the target authorization policy.
-
-Every tool returns a uniform envelope:
-
-```json
-{ "status": "success", "...": "payload" }
-{ "status": "error", "code": "zap_timeout", "message": "...", "retryable": true }
-```
-
----
-
-## Authenticated scanning
-
-The recommended workflow (mirrors ZAP's official "Getting Authenticated" guide):
-
-1. `zap_create_context` → get a context ID; scope it with
-   `zap_include_in_context` / `zap_exclude_from_context` (exclude logout URLs).
-2. `zap_set_authentication_method` (e.g. `formBasedAuthentication`) — use
-   `zap_get_auth_method_config_params` to discover the required parameters.
-3. `zap_set_logged_in_indicator` and/or `zap_set_logged_out_indicator`.
-4. `zap_new_user` → `zap_set_user_credentials` → `zap_set_user_enabled`.
-5. Optionally `zap_set_forced_user` + `zap_set_forced_user_mode` to keep the
-   session alive during long scans.
-6. Crawl and scan authenticated: `zap_spider_scan_as_user`,
-   `zap_ajax_spider_scan_as_user`, `zap_active_scan_as_user`.
-
-For repeatable engagements, drive the whole pipeline with an
-[Automation Framework](https://www.zaproxy.org/docs/automate/automation-framework/)
-plan via `zap_run_automation_plan`.
-
----
-
-## Connecting an MCP client
-
-Add to your MCP client configuration (e.g. `claude_desktop_config.json`):
+Then point your MCP client at it:
 
 ```json
 {
   "mcpServers": {
-    "owasp-zap": {
-      "url": "http://localhost:8000/mcp"
-    }
+    "owasp-zap": { "url": "http://localhost:8000/mcp" }
   }
 }
 ```
 
 ---
 
-## Development & testing
+## 🔑 Authenticated scanning in 6 steps
+
+The capability most ZAP wrappers skip — scan behind a login:
+
+```text
+1. create_context ─────────────► scope it (include app, exclude /logout)
+2. set_authentication_method ──► e.g. formBasedAuthentication
+3. set_logged_in / out_indicator
+4. new_user → set_user_credentials → set_user_enabled
+5. set_forced_user (+ mode)  ──► keeps the session alive during scans
+6. spider_scan_as_user → active_scan_as_user
+```
+
+Prefer repeatable runs? Drive the whole pipeline with a ZAP
+[Automation Framework](https://www.zaproxy.org/docs/automate/automation-framework/)
+plan via `zap_run_automation_plan`.
+
+---
+
+## 🧰 The 67 tools
+
+Tools marked 🎯 are gated by the target-authorization policy. Every tool returns
+a uniform envelope: `{"status":"success",...}` or
+`{"status":"error","code":...,"retryable":...}`.
+
+<details>
+<summary><b>Core &amp; crawling</b> (15)</summary>
+
+| Group | Tools |
+|---|---|
+| Core & health | `get_version`, `access_url` 🎯, `get_sites`, `get_urls`, `new_session` |
+| Spider | `spider_scan` 🎯, `spider_scan_as_user` 🎯, `spider_status`, `spider_results`, `spider_stop` |
+| AJAX spider | `ajax_spider_scan` 🎯, `ajax_spider_scan_as_user` 🎯, `ajax_spider_status`, `ajax_spider_results`, `ajax_spider_stop` |
+
+</details>
+
+<details>
+<summary><b>Scanning &amp; findings</b> (20)</summary>
+
+| Group | Tools |
+|---|---|
+| Active scan | `active_scan` 🎯, `active_scan_as_user` 🎯, `active_scan_status`, `active_scan_progress`, `active_scan_stop`, `active_scan_pause`, `active_scan_resume`, `list_scan_policies` |
+| Passive scan | `passive_scan_status`, `passive_scan_set_enabled`, `passive_scan_clear_queue` |
+| Findings & triage | `get_alerts`, `get_alerts_summary`, `get_alert_details`, `get_number_of_alerts`, `delete_all_alerts`, `add_alert_filter`, `list_alert_filters`, `apply_alert_filters`, `retest_alerts` |
+
+</details>
+
+<details>
+<summary><b>Auth, context, imports &amp; reports</b> (32)</summary>
+
+| Group | Tools |
+|---|---|
+| Context & scope | `create_context`, `include_in_context`, `exclude_from_context`, `list_contexts`, `get_context`, `export_context`, `import_context` |
+| Authentication | `get_auth_methods`, `get_auth_method_config_params`, `set_authentication_method`, `get_authentication_method`, `set_logged_in_indicator`, `set_logged_out_indicator` |
+| Users | `new_user`, `set_user_credentials`, `set_user_enabled`, `list_users`, `get_user` |
+| Forced user | `set_forced_user`, `set_forced_user_mode`, `get_forced_user`, `is_forced_user_mode_enabled` |
+| Imports & automation | `import_openapi_url`, `import_openapi_file`, `import_graphql_url`, `import_har`, `import_urls`, `run_automation_plan`, `automation_plan_progress` |
+| Reports | `list_report_templates`, `report_template_details`, `generate_report` |
+
+</details>
+
+> All tool names are prefixed with `zap_` (e.g. `zap_active_scan`).
+
+---
+
+## 🛡️ Security model
+
+| Control | Behavior |
+|---|---|
+| **API key** | Required. Server won't start without `ZAP_API_KEY` (dev override: `ZAP_ALLOW_INSECURE=true`). Never logged. |
+| **Metadata block** | `169.254.169.254`, `metadata.google.internal`, etc. are **always** refused. Not configurable. |
+| **Scope allowlist** | `ZAP_TARGET_ALLOWLIST` pins attackable hosts to your engagement. |
+| **Private-range block** | `ZAP_BLOCK_PRIVATE_TARGETS=true` refuses internal targets. |
+| **Localhost binding** | MCP `:8000` and ZAP `:8080` publish on `127.0.0.1` only. |
+| **Response caps** | Large lists are bounded (`max_response_items`) with `truncated` metadata. |
+
+> [!IMPORTANT]
+> The MCP endpoint has **no built-in auth** and can launch attacks. To expose it
+> beyond localhost, set `MCP_BIND=0.0.0.0` **and** front it with an
+> authenticating reverse proxy.
+
+<details>
+<summary><b>⚙️ Configuration reference</b></summary>
+
+| Variable | Default | Description |
+|---|---|---|
+| `ZAP_API_KEY` | *(required)* | Must match the ZAP daemon's key. |
+| `ZAP_BASE_URL` | `http://zap:8080` | ZAP API base URL. |
+| `ZAP_TARGET_ALLOWLIST` | *(empty)* | Comma-separated allowed host suffixes. |
+| `ZAP_BLOCK_PRIVATE_TARGETS` | `false` | Refuse private/loopback targets. |
+| `MCP_BIND` | `127.0.0.1` | Host interface the MCP port binds to. |
+| `REQUEST_TIMEOUT` / `CONNECT_TIMEOUT` | `60` / `10` | HTTP timeouts (s). |
+| `ZAP_MAX_RETRIES` / `ZAP_RETRY_BACKOFF` | `2` / `0.5` | Retry policy. |
+| `ZAP_MAX_RESPONSE_ITEMS` | `500` | Cap on returned list items. |
+
+</details>
+
+---
+
+## 🧪 Development
 
 ```bash
 python -m venv .venv && source .venv/bin/activate
 pip install -r requirements-dev.txt
-pytest -q
+pytest -q          # policy, config, error envelope, tool behavior
 ```
 
-The suite covers the target-authorization policy (metadata block, allowlist,
-private-range), fail-closed config validation, the error/result envelope, the
-auth-methods fix, and per-tool target enforcement.
+CI runs `py_compile` + `pytest` on every push to `main`.
 
 ---
 
-## Responsible use
+## ⚖️ Responsible use
 
-Active scanning sends attack payloads. In most jurisdictions, testing systems
-without permission is illegal. Before scanning:
+Active scanning is an attack. In most jurisdictions, testing systems without
+permission is illegal. Before you scan:
 
-- Confirm the target is **in scope** for an engagement you are authorized to run.
-- Set `ZAP_TARGET_ALLOWLIST` to pin scope, and consider
-  `ZAP_BLOCK_PRIVATE_TARGETS=true` for internet-only engagements.
-- Rotate `ZAP_API_KEY` to a long random value; never commit `.env`.
+- ✅ Confirm the target is **in scope** for an engagement you're authorized to run
+- ✅ Pin scope with `ZAP_TARGET_ALLOWLIST`; consider `ZAP_BLOCK_PRIVATE_TARGETS=true`
+- ✅ Use a long random `ZAP_API_KEY`; never commit `.env`
 
 Cloud metadata endpoints are always refused and this cannot be overridden.
 
 ---
 
-## Troubleshooting
+## 📄 License
 
-| Symptom | Likely cause / fix |
-|---|---|
-| Server won't start, "ZAP_API_KEY is not set" | Set `ZAP_API_KEY` in `.env` (or `ZAP_ALLOW_INSECURE=true` for dev). |
-| `{"code": "zap_unreachable"}` | ZAP not up/healthy, or `ZAP_BASE_URL` wrong. Check `docker compose ps`. |
-| `{"code": "target_not_allowed"}` | Target failed the policy — add it to `ZAP_TARGET_ALLOWLIST`, or it's a blocked metadata/private host. |
-| `no_implementor` from ZAP | The relevant ZAP add-on isn't installed (e.g. AJAX Spider, Retest). |
-| Auth methods list empty | Fixed in this build (reads `supportedMethods`); ensure you're on the current image. |
+[MIT](LICENSE) © Neeraj829784 — swap the `LICENSE` file for Apache-2.0 if you
+want an explicit patent grant.
 
----
-
-## License
-
-[MIT](LICENSE) © Neeraj829784. Change the `LICENSE` file if you prefer another
-license (e.g. Apache-2.0 for an explicit patent grant).
+<div align="center"><sub>Built for authorized penetration testing &amp; bug-bounty work. Hack responsibly. 🛡️</sub></div>
