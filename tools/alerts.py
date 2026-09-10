@@ -6,7 +6,7 @@ specific alerts to confirm whether they are still present.
 """
 from typing import Any, Dict, Optional
 
-from zap_client import envelope, zap_client
+from zap_client import cap_list, envelope, zap_client
 
 # ZAP numeric risk levels used by several endpoints.
 RISK_LEVELS = {0: "Informational", 1: "Low", 2: "Medium", 3: "High"}
@@ -34,7 +34,13 @@ async def zap_get_alerts(
         "count": count,
     }
     data = await zap_client.get_view("alert", "alerts", params=params)
-    return {"status": "success", "alerts": data.get("alerts", [])}
+    capped = cap_list(data.get("alerts", []))
+    return {
+        "status": "success",
+        "alerts": capped["items"],
+        "total": capped["total"],
+        "truncated": capped["truncated"],
+    }
 
 
 @envelope

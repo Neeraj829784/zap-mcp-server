@@ -6,7 +6,7 @@ gated by the target-authorization policy. Status/results/stop calls are not.
 from typing import Any, Dict, Optional
 
 from policy import TargetNotAllowedError, authorize_target
-from zap_client import envelope, zap_client
+from zap_client import cap_list, envelope, zap_client
 
 
 def _target_error(exc: TargetNotAllowedError) -> Dict[str, Any]:
@@ -116,7 +116,14 @@ async def zap_spider_results(scan_id: str) -> Dict[str, Any]:
         scan_id: The scan ID.
     """
     data = await zap_client.get_view("spider", "results", params={"scanId": scan_id})
-    return {"status": "success", "scan_id": scan_id, "urls": data.get("results", [])}
+    capped = cap_list(data.get("results", []))
+    return {
+        "status": "success",
+        "scan_id": scan_id,
+        "urls": capped["items"],
+        "total": capped["total"],
+        "truncated": capped["truncated"],
+    }
 
 
 @envelope

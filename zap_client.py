@@ -255,3 +255,19 @@ def envelope(fn: Callable) -> Callable:
 
 # Shared singleton instance used by all tool modules.
 zap_client = ZAPClient()
+
+
+def cap_list(items: Any) -> Dict[str, Any]:
+    """Bound a potentially large list to ``settings.max_response_items``.
+
+    Returns a dict with the (possibly truncated) items plus metadata so the
+    caller always knows the true size and whether truncation occurred. This
+    prevents a scan of a large target from flooding the LLM's context window.
+    """
+    if not isinstance(items, list):
+        return {"items": items, "total": None, "truncated": False}
+    total = len(items)
+    limit = settings.max_response_items
+    if total > limit:
+        return {"items": items[:limit], "total": total, "returned": limit, "truncated": True}
+    return {"items": items, "total": total, "returned": total, "truncated": False}

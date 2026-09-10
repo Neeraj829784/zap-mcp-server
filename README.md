@@ -1,5 +1,8 @@
 # OWASP ZAP MCP Server
 
+[![CI](https://github.com/Neeraj829784/zap-mcp-server/actions/workflows/ci.yml/badge.svg)](https://github.com/Neeraj829784/zap-mcp-server/actions/workflows/ci.yml)
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
+
 A production-grade [Model Context Protocol](https://modelcontextprotocol.io)
 (MCP) server that exposes [OWASP ZAP](https://www.zaproxy.org/) to LLM clients
 (Claude Desktop, Cursor, etc.) for **authorized penetration testing and
@@ -73,6 +76,13 @@ internal infrastructure.
 
 Read-only view tools (version, sites, alerts) are intentionally **not** gated —
 they observe existing state and generate no traffic to the target.
+
+> **Network exposure.** The MCP control endpoint has **no built-in
+> authentication** and can launch attack traffic, so `docker-compose.yml`
+> publishes it on **`127.0.0.1:8000` only**. To expose it deliberately, set
+> `MCP_BIND=0.0.0.0` *and* place an authenticating reverse proxy in front of it.
+> The ZAP API is likewise published on `127.0.0.1:8080` and its API address is
+> restricted to loopback/private ranges.
 
 ---
 
@@ -253,3 +263,10 @@ Cloud metadata endpoints are always refused and this cannot be overridden.
 | `{"code": "target_not_allowed"}` | Target failed the policy — add it to `ZAP_TARGET_ALLOWLIST`, or it's a blocked metadata/private host. |
 | `no_implementor` from ZAP | The relevant ZAP add-on isn't installed (e.g. AJAX Spider, Retest). |
 | Auth methods list empty | Fixed in this build (reads `supportedMethods`); ensure you're on the current image. |
+
+---
+
+## License
+
+[MIT](LICENSE) © Neeraj829784. Change the `LICENSE` file if you prefer another
+license (e.g. Apache-2.0 for an explicit patent grant).

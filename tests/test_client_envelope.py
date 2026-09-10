@@ -62,3 +62,21 @@ async def test_api_error_has_code(zc):
     assert err.code == "does_not_exist"
     assert err.http_status == 400
     assert err.retryable is False
+
+
+def test_cap_list_truncates_and_reports(zc, monkeypatch):
+    from types import SimpleNamespace
+
+    monkeypatch.setattr(zc, "settings", SimpleNamespace(max_response_items=3))
+    result = zc.cap_list(list(range(10)))
+    assert result["truncated"] is True
+    assert result["total"] == 10
+    assert result["returned"] == 3
+    assert result["items"] == [0, 1, 2]
+
+
+def test_cap_list_passthrough_small(zc):
+    result = zc.cap_list([1, 2])
+    assert result["truncated"] is False
+    assert result["total"] == 2
+    assert result["items"] == [1, 2]

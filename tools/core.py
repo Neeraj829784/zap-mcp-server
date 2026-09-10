@@ -2,7 +2,7 @@
 from typing import Any, Dict
 
 from policy import TargetNotAllowedError, authorize_target
-from zap_client import envelope, zap_client
+from zap_client import cap_list, envelope, zap_client
 
 
 @envelope
@@ -40,14 +40,26 @@ async def zap_access_url(url: str, follow_redirects: bool = True) -> Dict[str, A
 async def zap_get_sites() -> Dict[str, Any]:
     """List the base sites recorded in the ZAP site tree."""
     data = await zap_client.get_view("core", "sites")
-    return {"status": "success", "sites": data.get("sites", [])}
+    capped = cap_list(data.get("sites", []))
+    return {
+        "status": "success",
+        "sites": capped["items"],
+        "total": capped["total"],
+        "truncated": capped["truncated"],
+    }
 
 
 @envelope
 async def zap_get_urls() -> Dict[str, Any]:
     """List all URLs discovered across the site tree."""
     data = await zap_client.get_view("core", "urls")
-    return {"status": "success", "urls": data.get("urls", [])}
+    capped = cap_list(data.get("urls", []))
+    return {
+        "status": "success",
+        "urls": capped["items"],
+        "total": capped["total"],
+        "truncated": capped["truncated"],
+    }
 
 
 @envelope
