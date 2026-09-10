@@ -1,0 +1,5 @@
+# Runtime dependencies. Pinned to validated versions with bounded upper ranges
+# for reproducible, non-surprising builds. Bump deliberately and re-test.
+mcp>=2.2.0,<3.0.0
+httpx>=0.28.1,<0.29.0
+python-dotenv>=1.0.1,<2.0.0

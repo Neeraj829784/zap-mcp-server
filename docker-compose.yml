@@ -1,0 +1,71 @@
+# OWASP ZAP MCP server - container orchestration.
+#
+# Secrets are provided via a local .env file (see .env.example); the API key is
+# never hard-coded here. The ZAP daemon's API port is published only on the
+# loopback interface so it is not exposed on every host interface.
+services:
+  zap:
+    # Pinned to the version this stack was validated against. Bump deliberately.
+    image: zaproxy/zap-stable:2.17.0
+    container_name: zap-daemon
+    user: zap
+    command: >
+      zap.sh -daemon
+      -host 0.0.0.0
+      -port 8080
+      -config api.addrs.addr.name=.*
+      -config api.addrs.addr.regex=true
+      -config api.key=${ZAP_API_KEY:?ZAP_API_KEY must be set in .env}
+    # Publish the ZAP API/proxy only to localhost. Other containers still reach
+    # it over the internal network by service name; it is not world-exposed.
+    ports:
+      - "127.0.0.1:8080:8080"
+    volumes:
+      - zap-wrk:/zap/wrk
+    networks:
+      - zapnet
+    healthcheck:
+      test:
+        - CMD
+        - /bin/sh
+        - -c
+        - >
+          curl -sf
+          "http://localhost:8080/JSON/core/view/version/?apikey=${ZAP_API_KEY}"
+          || exit 1
+      interval: 15s
+      timeout: 5s
+      retries: 10
+      start_period: 30s
+    restart: unless-stopped
+
+  mcp-server:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: zap-mcp-server
+    container_name: zap-mcp-server
+    ports:
+      - "8000:8000"
+    environment:
+      - ZAP_BASE_URL=http://zap:8080
+      - ZAP_API_KEY=${ZAP_API_KEY:?ZAP_API_KEY must be set in .env}
+      - MCP_HOST=0.0.0.0
+      - MCP_PORT=8000
+      # Optional engagement-scope controls (see .env.example):
+      - ZAP_TARGET_ALLOWLIST=${ZAP_TARGET_ALLOWLIST:-}
+      - ZAP_BLOCK_PRIVATE_TARGETS=${ZAP_BLOCK_PRIVATE_TARGETS:-false}
+    depends_on:
+      zap:
+        condition: service_healthy
+    networks:
+      - zapnet
+    restart: unless-stopped
+
+volumes:
+  zap-wrk:
+
+networks:
+  # Managed by this compose file (not external) so a fresh `up` works cleanly.
+  zapnet:
+    driver: bridge
