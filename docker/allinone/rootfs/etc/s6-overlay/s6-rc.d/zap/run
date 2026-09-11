@@ -1,0 +1,24 @@
+#!/command/with-contenv sh
+# Supervised OWASP ZAP daemon.
+#
+# Bound to 127.0.0.1 only. In this image the sole consumer of the ZAP API is the
+# MCP server in the same network namespace, so the API is not reachable from
+# outside the container at all -- a tighter posture than the compose setup, which
+# has to publish it for cross-container access.
+#
+# Consequence worth knowing: ZAP's HTTP proxy is likewise not exposed, so you
+# cannot point a browser at it. Use the compose deployment if you need that.
+set -eu
+
+key=$(cat /run/zap-mcp/api-key)
+
+echo "[zap] starting OWASP ZAP daemon on 127.0.0.1:8080"
+
+# exec so ZAP replaces this shell and receives supervisor signals directly.
+exec s6-setuidgid zap \
+    /zap/zap.sh -daemon \
+        -host 127.0.0.1 \
+        -port 8080 \
+        -config api.addrs.addr.name=127.0.0.1 \
+        -config api.addrs.addr.regex=false \
+        -config api.key="${key}"

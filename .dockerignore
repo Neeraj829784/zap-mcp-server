@@ -1,0 +1,36 @@
+# Keep the build context small and make sure local-only files can never be
+# baked into an image layer.
+
+# Secrets and local config
+.env
+*.env
+!.env.example
+
+# Local virtualenv (hundreds of MB, and Linux/host specific)
+.venv/
+venv/
+
+# Python caches and test artifacts
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+htmlcov/
+
+# VCS and CI
+.git/
+.github/
+.gitignore
+
+# Editor / agent scratch
+.kiro/
+.agents/
+.vscode/
+.idea/
+
+# Docs and compose files are not needed inside any image
+README.md
+LICENSE
+docker-compose.yml

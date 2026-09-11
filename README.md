@@ -97,9 +97,86 @@ flowchart LR
   `1000` via `group_add`, so both unprivileged users can read and write there and
   new files inherit the shared group automatically.
 
+The optional all-in-one image collapses this into one container: same components
+and the same MCP endpoint, but ZAP is reached over loopback and `/zap/wrk` is just
+a local directory, so no volume sharing is needed. See Quick start, Option A.
+
 ---
 
 ## 🚀 Quick start
+
+Two ways to run this. Pick based on whether you are evaluating it or relying on it.
+
+| | **All-in-one** | **Compose** (recommended) |
+|---|---|---|
+| Launch | `docker build` once, then one `docker run` | `docker compose up -d` |
+| Config before first run | none | create `.env`, choose an API key |
+| Containers | 1 | 2 |
+| ZAP API key | auto-generated per container | you supply it |
+| ZAP proxy/API reachable | no, loopback-only inside the container | yes, on `127.0.0.1` |
+| Restart MCP without losing scan state | no | yes |
+| Upgrade ZAP independently | no, rebuild | yes, change the image tag |
+| Best for | first look, demos, CI throwaways | real engagements, anything long-running |
+
+### Option A — all-in-one (fastest way to try it)
+
+Both ZAP and the MCP server in one container, supervised by s6:
+
+```bash
+docker build -f Dockerfile.allinone -t zap-mcp-server:all-in-one .
+docker run -d --name zap-mcp -p 127.0.0.1:8000:8000 zap-mcp-server:all-in-one
+```
+
+That is the whole setup — no `.env`, and no API key to invent. ZAP's API is bound
+to loopback *inside* the container and the key is generated at startup, so it
+never becomes something you have to manage.
+
+First boot takes roughly 60–90s while ZAP's JVM starts and add-ons initialise.
+Wait for health before connecting:
+
+```bash
+docker inspect --format '{{.State.Health.Status}}' zap-mcp   # -> healthy
+```
+
+The container is `healthy` only when **both** ZAP's API and the MCP endpoint
+answer, so a green status means the whole stack is usable.
+
+<details>
+<summary><b>How the single container stays honest</b></summary>
+
+Running two processes in one container is normally an anti-pattern, so the parts
+that usually break are handled explicitly:
+
+- **s6-overlay is PID 1** — reaps orphaned processes and forwards signals, rather
+  than backgrounding with `&` and leaking zombies.
+- **Ordered startup** — services run `apikey → zap → zap-ready → mcp-server`. The
+  `zap-ready` gate polls ZAP's API and only then starts the MCP server, which is
+  the single-container equivalent of compose's `depends_on: service_healthy`.
+- **No degraded state** — if ZAP never becomes ready the container exits non-zero
+  instead of serving an MCP endpoint with a dead scanner behind it.
+- **Self-healing** — if either process dies, s6 restarts it.
+- **Clean shutdown** — `docker stop` exits 0 in ~3s; s6's grace periods are kept
+  under Docker's 10s SIGKILL deadline.
+- **Unprivileged** — s6 sets up as root, then both ZAP and the MCP server drop to
+  uid 1000. Neither runs as root.
+- **Pinned supervisor** — s6-overlay is fetched by version and checksum-verified
+  at build time.
+
+Overridable via `-e`: `ZAP_API_KEY` (use a fixed key), `ZAP_STARTUP_TIMEOUT`
+(readiness budget, default 300s), plus the usual `ZAP_TARGET_ALLOWLIST` /
+`ZAP_BLOCK_PRIVATE_TARGETS` scope controls.
+
+</details>
+
+> [!NOTE]
+> The all-in-one image does **not** expose ZAP's HTTP proxy or API, so you cannot
+> point a browser through it or open ZAP's own tooling. Use compose if you need
+> that. Trade-offs worth knowing before you rely on it: a ZAP upgrade means
+> rebuilding the image, restarting the MCP server also restarts ZAP and discards
+> live scan state, and one health signal covers both processes so it is less
+> obvious which half failed.
+
+### Option B — compose (recommended for real use)
 
 ```bash
 # 1. Set your secret (never committed)
@@ -114,7 +191,9 @@ docker compose ps                    # both services: healthy
 docker compose logs -f mcp-server    # "Registered 67 MCP tools"
 ```
 
-Then point your MCP client at it:
+### Connect your client
+
+Either option serves the same endpoint, so the client config is identical:
 
 ```json
 {
@@ -195,7 +274,7 @@ a uniform envelope: `{"status":"success",...}` or
 
 | Control | Behavior |
 |---|---|
-| **API key** | Required. Server won't start without `ZAP_API_KEY` (dev override: `ZAP_ALLOW_INSECURE=true`). Never logged. |
+| **API key** | Required. Server won't start without `ZAP_API_KEY` (dev override: `ZAP_ALLOW_INSECURE=true`). Never logged by this server: `httpx` request logging is suppressed because the ZAP API takes the key as a `?apikey=` query parameter. ZAP itself still echoes it once in its own startup line. |
 | **Metadata block** | `169.254.169.254`, `metadata.google.internal`, etc. are **always** refused. Not configurable. |
 | **Scope allowlist** | `ZAP_TARGET_ALLOWLIST` pins attackable hosts to your engagement. |
 | **Private-range block** | `ZAP_BLOCK_PRIVATE_TARGETS=true` refuses internal targets. |
@@ -221,6 +300,7 @@ a uniform envelope: `{"status":"success",...}` or
 | `ZAP_MAX_RETRIES` / `ZAP_RETRY_BACKOFF` | `2` / `0.5` | Retry policy. |
 | `ZAP_MAX_RESPONSE_ITEMS` | `500` | Cap on returned list items. |
 | `ZAP_REPORT_DIR` | `/zap/wrk` | Report output dir. Must be on the volume shared with ZAP. |
+| `ZAP_STARTUP_TIMEOUT` | `300` | All-in-one only: seconds to wait for ZAP's API before failing the container. |
 
 </details>
 

@@ -1,0 +1,33 @@
+#!/bin/sh
+# Health probe for the all-in-one image.
+#
+# A single container means a single health signal, so it must cover BOTH
+# processes: the container is only healthy when ZAP's API answers AND the MCP
+# endpoint is serving. Checking just one would let the container report healthy
+# while the other half is dead.
+set -eu
+
+key_file=/run/zap-mcp/api-key
+mcp_port="${MCP_PORT:-8000}"
+
+if [ ! -r "${key_file}" ]; then
+    echo "unhealthy: API key file not present yet" >&2
+    exit 1
+fi
+key=$(cat "${key_file}")
+
+# 1. ZAP API must return success.
+if ! curl -sf -o /dev/null "http://127.0.0.1:8080/JSON/core/view/version/?apikey=${key}"; then
+    echo "unhealthy: ZAP API is not responding" >&2
+    exit 1
+fi
+
+# 2. MCP endpoint must accept the connection. A bare GET to /mcp returns HTTP 400
+#    because the protocol requires negotiation; that still proves the app serves,
+#    so -f is deliberately omitted and only a connection failure counts.
+if ! curl -s -o /dev/null "http://127.0.0.1:${mcp_port}/mcp"; then
+    echo "unhealthy: MCP endpoint is not accepting connections" >&2
+    exit 1
+fi
+
+exit 0

@@ -1,0 +1,34 @@
+#!/command/with-contenv sh
+# Prepare the ZAP API key shared by both supervised processes.
+#
+# In the all-in-one image the ZAP API is bound to loopback inside the container,
+# so the key is an internal secret rather than something the user must manage.
+# Generating it here is what removes the "create a .env and invent a long random
+# value" step from first-time setup.
+#
+# An explicit ZAP_API_KEY is still honoured, so this image can be pointed at a
+# fixed key when that is wanted (e.g. reproducible test environments).
+set -eu
+
+KEY_DIR=/run/zap-mcp
+KEY_FILE="${KEY_DIR}/api-key"
+
+mkdir -p "${KEY_DIR}"
+chmod 0755 "${KEY_DIR}"
+
+if [ -n "${ZAP_API_KEY:-}" ]; then
+    printf '%s' "${ZAP_API_KEY}" > "${KEY_FILE}"
+    echo "[apikey] using ZAP_API_KEY supplied via the environment"
+else
+    # 32 random bytes, hex encoded. openssl ships in the ZAP base image.
+    openssl rand -hex 32 > "${KEY_FILE}"
+    echo "[apikey] generated an ephemeral ZAP API key for this container"
+    echo "[apikey] the key is internal: ZAP's API listens on loopback only and is"
+    echo "[apikey] not published, so the key is not a user-facing credential."
+    echo "[apikey] note: ZAP echoes it once in its own startup log ('Setting config"
+    echo "[apikey] api.key'). It is regenerated on every container start."
+fi
+
+# Readable by the zap user (which both services run as), nobody else.
+chown zap:zap "${KEY_FILE}"
+chmod 0400 "${KEY_FILE}"

@@ -1,0 +1,17 @@
+#!/command/with-contenv sh
+# Supervised MCP server.
+#
+# Only reached once the zap-ready gate has confirmed the ZAP API answers, so the
+# server never starts against a half-booted JVM.
+set -eu
+
+# Read the key as root, then drop privileges. Passed via the environment rather
+# than argv so it cannot be seen in the container's process list.
+ZAP_API_KEY=$(cat /run/zap-mcp/api-key)
+export ZAP_API_KEY
+
+cd /app
+
+echo "[mcp-server] starting MCP server on ${MCP_HOST:-0.0.0.0}:${MCP_PORT:-8000}"
+
+exec s6-setuidgid zap /opt/zap-mcp/bin/python server.py

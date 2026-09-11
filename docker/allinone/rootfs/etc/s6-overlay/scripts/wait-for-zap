@@ -1,0 +1,29 @@
+#!/command/with-contenv sh
+# Readiness gate: block until the ZAP API actually answers.
+#
+# This reproduces what `depends_on: condition: service_healthy` provides in the
+# compose setup. Without it the MCP server would start against a JVM that is
+# still booting and its first calls would fail.
+set -eu
+
+KEY_FILE=/run/zap-mcp/api-key
+TIMEOUT="${ZAP_STARTUP_TIMEOUT:-300}"
+
+key=$(cat "${KEY_FILE}")
+
+echo "[zap-ready] waiting up to ${TIMEOUT}s for the ZAP API to accept requests"
+
+elapsed=0
+while [ "${elapsed}" -lt "${TIMEOUT}" ]; do
+    if curl -sf -o /dev/null \
+        "http://127.0.0.1:8080/JSON/core/view/version/?apikey=${key}"; then
+        echo "[zap-ready] ZAP API is accepting requests after ${elapsed}s"
+        exit 0
+    fi
+    sleep 2
+    elapsed=$((elapsed + 2))
+done
+
+echo "[zap-ready] ZAP API did not become ready within ${TIMEOUT}s" >&2
+echo "[zap-ready] check the zap service logs above for JVM or plugin errors" >&2
+exit 1
