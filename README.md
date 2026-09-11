@@ -11,10 +11,13 @@ built straight from the [official ZAP API](https://www.zaproxy.org/docs/api/).
 
 [![CI](https://github.com/Neeraj829784/zap-mcp-server/actions/workflows/ci.yml/badge.svg)](https://github.com/Neeraj829784/zap-mcp-server/actions/workflows/ci.yml)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
-[![Python 3.12](https://img.shields.io/badge/Python-3.12-3776AB?logo=python&logoColor=white)](https://www.python.org/)
+[![Python 3.10+](https://img.shields.io/badge/Python-3.10%2B-3776AB?logo=python&logoColor=white)](https://www.python.org/)
 [![OWASP ZAP 2.17](https://img.shields.io/badge/OWASP%20ZAP-2.17.0-00549E)](https://www.zaproxy.org/)
 [![MCP](https://img.shields.io/badge/Protocol-MCP-6E56CF)](https://modelcontextprotocol.io)
-[![Docker](https://img.shields.io/badge/Docker-Compose-2496ED?logo=docker&logoColor=white)](https://docs.docker.com/compose/)
+[![Tools](https://img.shields.io/badge/Tools-67-1f883d)](#-the-67-tools)
+[![Docker](https://img.shields.io/badge/Docker-ready-2496ED?logo=docker&logoColor=white)](https://docs.docker.com/)
+
+<samp>[**Quick start**](#-quick-start) · [**See it in action**](#-see-it-in-action) · [**The 67 tools**](#-the-67-tools) · [**Authenticated scanning**](#-authenticated-scanning-in-6-steps) · [**Security**](#-security-model) · [**Responsible use**](#-responsible-use)</samp>
 
 </div>
 
@@ -23,6 +26,34 @@ built straight from the [official ZAP API](https://www.zaproxy.org/docs/api/).
 > **only** against systems you have explicit, written permission to test.
 > This server refuses cloud-metadata targets and can be pinned to an
 > engagement scope — but the responsibility is yours.
+
+---
+
+## ⚡ See it in action
+
+Once it's connected, you drive ZAP in plain language. The model picks the right
+tools and chains them — no REST calls, no ZAP UI:
+
+> 💬 **You:** *Crawl `https://juice-shop.herokuapp.com`, run an active scan, and summarise what you find.*
+
+Behind that one sentence, the assistant orchestrates the toolchain:
+
+```text
+①  zap_access_url            seed the target into ZAP's site tree
+②  zap_spider_scan       🎯  crawl for pages, forms, and parameters
+③  zap_active_scan       🎯  attack the discovered surface (SQLi, XSS, …)
+④  zap_get_alerts_summary    triage findings by severity
+⑤  zap_generate_report       export a shareable HTML report
+```
+
+> 🤖 **Assistant:** *Crawled 41 URLs and completed the active scan. Findings by
+> severity — **High:** SQL injection on `/rest/products/search`; **Medium:**
+> missing CSP and reflected XSS; plus several low-severity header issues. Full
+> report written to `/zap/wrk/report.html`.*
+
+Every attack-capable step (🎯) is checked against the target-authorization policy
+first, so the model physically cannot fire a scan at an out-of-scope or
+cloud-metadata host — regardless of what it's asked to do.
 
 ---
 
@@ -78,7 +109,7 @@ This project gives your AI assistant a **small, opinionated, safe** surface:
 ```mermaid
 flowchart LR
     A["🤖 LLM client<br/>(Claude · Cursor)"] -->|MCP / Streamable HTTP<br/>127.0.0.1:8000| B
-    B["🕷️ zap-mcp-server<br/>Python 3.12 · 67 tools<br/>target policy · pooled client"] -->|internal docker net<br/>http://zap:8080| C
+    B["🕷️ zap-mcp-server<br/>67 tools · target policy<br/>pooled async client"] -->|internal docker net<br/>http://zap:8080| C
     C["🛡️ zap-daemon<br/>OWASP ZAP 2.17.0<br/>API restricted to private ranges"]
     B <-->|shared volume<br/>/zap/wrk| D["📁 zap-wrk<br/>reports · imports"]
     C <-->|shared volume<br/>/zap/wrk| D
@@ -99,50 +130,52 @@ flowchart LR
 
 The optional all-in-one image collapses this into one container: same components
 and the same MCP endpoint, but ZAP is reached over loopback and `/zap/wrk` is just
-a local directory, so no volume sharing is needed. See Quick start, Option A.
+a local directory, so no volume sharing is needed. See [Quick start](#-quick-start).
 
 ---
 
 ## 🚀 Quick start
 
-Two ways to run this. Pick based on whether you are evaluating it or relying on it.
-
-| | **All-in-one** | **Compose** (recommended) |
-|---|---|---|
-| Launch | `docker build` once, then one `docker run` | `docker compose up -d` |
-| Config before first run | none | create `.env`, choose an API key |
-| Containers | 1 | 2 |
-| ZAP API key | auto-generated per container | you supply it |
-| ZAP proxy/API reachable | no, loopback-only inside the container | yes, on `127.0.0.1` |
-| Restart MCP without losing scan state | no | yes |
-| Upgrade ZAP independently | no, rebuild | yes, change the image tag |
-| Best for | first look, demos, CI throwaways | real engagements, anything long-running |
-
-### Option A — all-in-one (fastest way to try it)
-
-Both ZAP and the MCP server in one container, supervised by s6:
+**Fastest path — one image, zero config:**
 
 ```bash
 docker build -f Dockerfile.allinone -t zap-mcp-server:all-in-one .
 docker run -d --name zap-mcp -p 127.0.0.1:8000:8000 zap-mcp-server:all-in-one
 ```
 
-That is the whole setup — no `.env`, and no API key to invent. ZAP's API is bound
-to loopback *inside* the container and the key is generated at startup, so it
-never becomes something you have to manage.
-
-First boot takes roughly 60–90s while ZAP's JVM starts and add-ons initialise.
-Wait for health before connecting:
+No `.env`, no API key to invent — ZAP's API is bound to loopback *inside* the
+container and its key is generated at startup. First boot takes ~60–90s while
+ZAP's JVM warms up; wait for `healthy`, then you're live at
+`http://localhost:8000/mcp`:
 
 ```bash
 docker inspect --format '{{.State.Health.Status}}' zap-mcp   # -> healthy
 ```
 
-The container is `healthy` only when **both** ZAP's API and the MCP endpoint
-answer, so a green status means the whole stack is usable.
+That green status is meaningful: the container reports `healthy` only when
+**both** ZAP's API and the MCP endpoint answer.
+
+> For real engagements, the two-container **[compose](#-compose-recommended-for-real-use)**
+> setup is recommended — independently upgradable ZAP, and restarting the server
+> won't discard a live scan session.
+
+### Which setup should I use?
+
+| | 🅐 &nbsp;All-in-one | 🅑 &nbsp;Compose *(recommended)* |
+|---|---|---|
+| Launch | `docker build` once, then `docker run` | `docker compose up -d` |
+| Config before first run | none | create `.env`, choose an API key |
+| Containers | 1 | 2 |
+| ZAP API key | auto-generated per container | you supply it |
+| ZAP proxy/API reachable | no — loopback-only in the container | yes, on `127.0.0.1` |
+| Restart MCP without losing scan state | ✗ | ✓ |
+| Upgrade ZAP independently | ✗ rebuild | ✓ change the image tag |
+| Best for | first look, demos, CI throwaways | real engagements, long-running work |
 
 <details>
-<summary><b>How the single container stays honest</b></summary>
+<summary><b>🅐 &nbsp;All-in-one — how it stays honest, and overrides</b></summary>
+
+<br>
 
 Running two processes in one container is normally an anti-pattern, so the parts
 that usually break are handled explicitly:
@@ -176,7 +209,7 @@ Overridable via `-e`: `ZAP_API_KEY` (use a fixed key), `ZAP_STARTUP_TIMEOUT`
 > live scan state, and one health signal covers both processes so it is less
 > obvious which half failed.
 
-### Option B — compose (recommended for real use)
+### 🅑 Compose (recommended for real use)
 
 ```bash
 # 1. Set your secret (never committed)
