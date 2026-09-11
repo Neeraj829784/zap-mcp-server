@@ -4,6 +4,36 @@
 # never hard-coded here. The ZAP daemon's API port is published only on the
 # loopback interface so it is not exposed on every host interface.
 services:
+  # One-shot permission fixer for the shared work directory.
+  #
+  # Docker seeds a new named volume from the image's directory metadata, and
+  # /zap/wrk ships as root:root 0755. Both real services run unprivileged (ZAP as
+  # uid 1000, the MCP server as uid 10001), so neither could write there and
+  # report generation failed with a permission error. This runs as root before
+  # ZAP starts and hands the directory to the zap group:
+  #   - owner 1000:1000        -> ZAP writes as the owner
+  #   - mode 2775 (setgid)     -> group members write, and files created by
+  #                               either service inherit gid 1000 automatically,
+  #                               so the two containers can always read each
+  #                               other's files.
+  # The MCP server joins gid 1000 via `group_add` below.
+  #
+  # Reuses the ZAP image purely to avoid pulling anything extra; it exits
+  # immediately and does not stay running.
+  wrk-init:
+    image: zaproxy/zap-stable:2.17.0
+    container_name: zap-wrk-init
+    user: root
+    entrypoint:
+      - /bin/sh
+      - -c
+      - chown 1000:1000 /zap/wrk && chmod 2775 /zap/wrk
+    volumes:
+      - zap-wrk:/zap/wrk
+    # Touches only a volume; needs no network at all.
+    network_mode: none
+    restart: "no"
+
   zap:
     # Pinned to the version this stack was validated against. Bump deliberately.
     image: zaproxy/zap-stable:2.17.0
@@ -34,6 +64,10 @@ services:
       - zap-wrk:/zap/wrk
     networks:
       - zapnet
+    # Do not start until the shared work directory is writable.
+    depends_on:
+      wrk-init:
+        condition: service_completed_successfully
     healthcheck:
       test:
         - CMD
@@ -72,6 +106,17 @@ services:
     depends_on:
       zap:
         condition: service_healthy
+    # Shared work directory. ZAP interprets every file path in its API (report
+    # output, HAR / OpenAPI / URL-list / automation-plan imports) against its OWN
+    # filesystem, so the MCP server must see the same directory at the same path
+    # for those tools to be usable: the agent stages an input file here and ZAP
+    # reads it, or ZAP writes a report here and the agent reads it back.
+    volumes:
+      - zap-wrk:/zap/wrk
+    # Join ZAP's group (gid 1000) so the unprivileged appuser can write to the
+    # setgid-shared directory prepared by wrk-init.
+    group_add:
+      - "1000"
     networks:
       - zapnet
     restart: unless-stopped

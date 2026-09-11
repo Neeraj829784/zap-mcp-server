@@ -38,7 +38,9 @@ async def zap_import_openapi_file(
     """Import an OpenAPI/Swagger definition from a local file.
 
     Args:
-        file_path: Absolute path to the spec file (inside the ZAP host).
+        file_path: Absolute path to the spec file, resolved on the ZAP
+            container's filesystem. Place the file in the shared work directory
+            (``/zap/wrk``, mounted in both containers) so ZAP can read it.
         target_url: Optional target URL to override the spec's server URL.
         context_id: Optional context to associate imported URLs with.
     """
@@ -67,7 +69,9 @@ async def zap_import_har(file_path: str) -> Dict[str, Any]:
     """Import HTTP traffic from a HAR file to seed the site tree.
 
     Args:
-        file_path: Absolute path to the HAR file (inside the ZAP host).
+        file_path: Absolute path to the HAR file, resolved on the ZAP
+            container's filesystem. Place the file in the shared work directory
+            (``/zap/wrk``, mounted in both containers) so ZAP can read it.
     """
     data = await zap_client.execute_action(
         "exim", "importHar", params={"filePath": file_path}
@@ -80,7 +84,9 @@ async def zap_import_urls(file_path: str) -> Dict[str, Any]:
     """Import a list of URLs (one per line) from a file.
 
     Args:
-        file_path: Absolute path to the URL list file (inside the ZAP host).
+        file_path: Absolute path to the URL list file, resolved on the ZAP
+            container's filesystem. Place the file in the shared work directory
+            (``/zap/wrk``, mounted in both containers) so ZAP can read it.
     """
     data = await zap_client.execute_action(
         "exim", "importUrls", params={"filePath": file_path}
@@ -97,7 +103,9 @@ async def zap_run_automation_plan(file_path: str) -> Dict[str, Any]:
     reproducible engagements. Returns a plan ID for progress polling.
 
     Args:
-        file_path: Absolute path to the plan YAML (inside the ZAP host).
+        file_path: Absolute path to the plan YAML, resolved on the ZAP
+            container's filesystem. Place the file in the shared work directory
+            (``/zap/wrk``, mounted in both containers) so ZAP can read it.
     """
     data = await zap_client.execute_action(
         "automation", "runPlan", params={"filePath": file_path}

@@ -43,8 +43,10 @@ async def zap_generate_report(
     """Generate a scan report using the reports component.
 
     The report is written inside the configured report directory
-    (``ZAP_REPORT_DIR``); any directory components in ``report_file_name`` are
-    stripped to prevent path traversal.
+    (``ZAP_REPORT_DIR``, default ``/zap/wrk``); any directory components in
+    ``report_file_name`` are stripped to prevent path traversal. ZAP writes the
+    file on its own filesystem, and that directory is a volume shared with this
+    server, so the generated report can be read back afterwards.
 
     Args:
         title: Report title.

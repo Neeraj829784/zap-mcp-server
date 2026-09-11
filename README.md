@@ -80,12 +80,22 @@ flowchart LR
     A["🤖 LLM client<br/>(Claude · Cursor)"] -->|MCP / Streamable HTTP<br/>127.0.0.1:8000| B
     B["🕷️ zap-mcp-server<br/>Python 3.12 · 67 tools<br/>target policy · pooled client"] -->|internal docker net<br/>http://zap:8080| C
     C["🛡️ zap-daemon<br/>OWASP ZAP 2.17.0<br/>API restricted to private ranges"]
+    B <-->|shared volume<br/>/zap/wrk| D["📁 zap-wrk<br/>reports · imports"]
+    C <-->|shared volume<br/>/zap/wrk| D
     B -.->|refuses metadata / out-of-scope| X["⛔ blocked targets"]
 ```
 
 - The MCP server reaches ZAP over the internal Docker network.
 - Both ports are published on **`127.0.0.1` only** — nothing is world-exposed.
 - Every state-changing ZAP action requires the API key.
+- **Shared `/zap/wrk` volume.** ZAP resolves every file path in its API against
+  its own filesystem, so both containers mount the same volume at the same path.
+  This is what makes file-based tools work end to end: the agent stages an input
+  (HAR, OpenAPI spec, URL list, automation plan) for ZAP to read, and reads back
+  reports ZAP writes. A one-shot `wrk-init` service prepares the directory as
+  `1000:1000` mode `2775` (setgid) before ZAP starts; the MCP server joins gid
+  `1000` via `group_add`, so both unprivileged users can read and write there and
+  new files inherit the shared group automatically.
 
 ---
 
@@ -210,6 +220,7 @@ a uniform envelope: `{"status":"success",...}` or
 | `REQUEST_TIMEOUT` / `CONNECT_TIMEOUT` | `60` / `10` | HTTP timeouts (s). |
 | `ZAP_MAX_RETRIES` / `ZAP_RETRY_BACKOFF` | `2` / `0.5` | Retry policy. |
 | `ZAP_MAX_RESPONSE_ITEMS` | `500` | Cap on returned list items. |
+| `ZAP_REPORT_DIR` | `/zap/wrk` | Report output dir. Must be on the volume shared with ZAP. |
 
 </details>
 
