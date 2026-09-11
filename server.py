@@ -110,6 +110,15 @@ logging.basicConfig(
     format="%(asctime)s [%(levelname)s] %(name)s: %(message)s",
     handlers=[logging.StreamHandler(sys.stderr)],
 )
+
+# SECURITY: httpx logs every request line at INFO, and the ZAP API takes its key
+# as a query parameter (?apikey=...). Left at INFO, the key is written to
+# container logs on every single call -- where `docker logs` and any downstream
+# log shipper would capture it. Raise the threshold so request URLs are not
+# emitted; genuine transport warnings and errors still surface.
+logging.getLogger("httpx").setLevel(logging.WARNING)
+logging.getLogger("httpcore").setLevel(logging.WARNING)
+
 logger = logging.getLogger("zap_mcp")
 
 
